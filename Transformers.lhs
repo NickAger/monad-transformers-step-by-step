@@ -780,6 +780,12 @@ their valuable feedback and suggestions for improvement. Also thanks
 to G{\'a}bor Lipt{\'a}k for providing patches to port this tutorial to newer
 GHC versions.
 
+\section*{See also}
+\begin{itemize}
+  \item Reddit link {\small\tt
+\url{https://www.reddit.com/r/haskell/comments/un40c/monad_transformers_step_by_step/}}
+\end{itemize}
+
 \bibliographystyle{plain}
 \bibliography{bibliography}
 
@@ -836,3 +842,5 @@ GHC versions.
 
 
 --  LocalWords:  ErrorT StateT GHC Exp deconstruct monad's ReaderT Env
+
+
