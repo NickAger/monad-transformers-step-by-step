@@ -1,4 +1,4 @@
-# Creating the pdf
+# Creating the "Monad transformers step-by-step" pdf
 
 On a clean Ubuntu VM (14.04) I ran:
 
