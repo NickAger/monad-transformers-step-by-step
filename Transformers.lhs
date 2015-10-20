@@ -2,22 +2,21 @@
 
 \usepackage[margin=2.5cm]{geometry}
 \usepackage{hyperref}
+\usepackage[utf8x]{inputenc}
 
 %include polycode.fmt
 %format alpha = "\alpha"
-% downloaded from http://www.cs.virginia.edu/~wh5a/personal/Transformers.lhs
 
-\title{\bf Monad Transformers Step by Step} \author{Martin
-  Grabm{\"u}ller} \date{Oct 16 2006
-  (Draft)\footnote{Sections~\ref{sec:wei-monad} and \ref{sec:wei-mt} are
-    added by Wei Hu, Feb 2008.  Unfortunately the bib file is missing,
-    so are the references.}}
+\title{\bf Monad Transformers Step by Step}
+\author{Martin Grabm{\"u}ller}
+\date{Oct 16 2006 (Draft\footnote{Ported to newer GHC in 2012})}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
 \noindent
+
 In this tutorial, we describe how to use monad transformers in order
 to incrementally add functionality to Haskell programs.  It is not a
 paper about \emph{implementing} transformers, but about \emph{using}
@@ -65,11 +64,8 @@ library modules |Control.Monad.Error| etc.  Both the hierarchical
 module names of these modules and some of their implementation details
 are beyond Haskell'98.  Nevertheless, these extensions are well
 supported in current versions of the Glasgow Haskell compiler (GHC)
-\cite{GHC2006GHCHomepage} and the Hugs Haskell interpreter
-\cite{Hugs2006HugsHomepage}.  The programs have been tested using
-versions 6.4.2 and 6.5 (pre-release) of GHC and version 20050308 of
-Hugs\footnote{You need to pass the \texttt{-98} option to Hugs in
-order to allow the required Haskell extensions.}.
+\cite{GHC2006GHCHomepage}.  The programs have been tested using
+GHC version 7.4.1.
 
 The monad transformer modules are inspired by a paper by Mark P. Jones
 \cite{Jones1995FunctionalProgramming}, which gives a very readable
@@ -79,15 +75,16 @@ paper.
 This document has been converted from a literate Haskell script using
 Andres L{\"o}h's \texttt{lhs2TeX}\footnote{\small\tt
 http://www.iai.uni-bonn.de/\~{}loeh/} preprocessor.  The script is
-executable by both GHC and Hugs.  The literate Haskell source file
+executable by GHC.  The literate Haskell source file
 \texttt{Transformers.lhs} is available from my
-homepage\footnote{\small\tt \url{http://uebb.cs.tu-berlin.de/~magr/pub/Transformers.lhs}}\footnote{\small\tt \url{http://www.cs.virginia.edu/~wh5a/personal/Transformers.lhs}}.
+homepage\footnote{\small\tt
+\url{http://www.grabmueller.de/martin/www/pub/Transformers.lhs}}.
 
 It is probably best to read this paper near a computer so that you can
 look up the types and descriptions of the various functions used from
 the monad transformer library or the Haskell standard library.  The
 best setup is a printed copy of this paper, a web browser showing the
-online library documentation and a running incarnation of ghci or hugs
+online library documentation and a running incarnation of ghci
 with a loaded |Transformers| module (to be introduced below) for
 checking out types interactively using the \texttt{:type} (or
 \texttt{:t}) command.
@@ -251,7 +248,7 @@ Based on the |Eval1| monad, we now rewrite the |eval0| function as
 
 > eval1                   ::  Env -> Exp -> Eval1 Value
 > eval1 env (Lit i)       =   return $ IntVal i
-> eval1 env (Var n)       =   Map.lookup n env
+> eval1 env (Var n)       =   maybe (fail ("undefined variable: " ++ n)) return $ Map.lookup n env
 > eval1 env (Plus e1 e2)  =   do  IntVal i1  <- eval1 env e1
 >                                 IntVal i2  <- eval1 env e2
 >                                 return $ IntVal (i1 + i2)
@@ -315,99 +312,10 @@ we could write
 
 at the \texttt{ghci} prompt.  This would run the expression in the
 |IO| monad, because internally the interpreter uses the |print|
-function, which lives in just this monad.\footnote{This only works in
-recent versions of GHC and unfortunately not in Hugs.}  In some
-contexts, this is a nice feature, but in general you will be using
-some operations specific to a particular monad, and this forces your
-operation to stay within that special monad.
-
-\subsection{A Few Words on Monads}
-\label{sec:wei-monad}
-
-We need to clarify some concept before moving on to monads and monad
-transformers.  A data type |T| is a monad if it is an instance of the
-|Monad| class.  That is, we provided two functions |return| and
-|(>>=)| for T, whose implementation depends on the very semantics of
-T.  Besides the constraints on the two functions' types, they must
-obey the monad laws too, but this constraint is not decidable by
-algorithms, and thus has to be enforced by programmers themselves.
-
-The monad class is only an interface that specifies what a type T must
-provide to become a monad.  The real strengths of monads come from the
-power of type classes supported by the strong type system, and the
-useful monad types predefined in the monad transformer library
-(|mtl|).  For instance, the |Either| type is a monad:
-
-\begin{verbatim}
-data  Either a b  =  Left a | Right b   deriving (Eq, Ord )
-
-instance (Error e) => Monad (Either e) where
-    return        = Right
-    Left  l >>= _ = Left l
-    Right r >>= k = k r
-    fail msg      = Left (strMsg msg)
-\end{verbatim}
-
-The |Monad| class is further extended to more useful classes,
-including |MonadError|, |MonadReader|, |MonadWriter|, etc.  These
-extended classes can be thought of as refined interfaces that require
-more functions to be implemented by their instances.  For example:
-
-\begin{verbatim}
-class (Monad m) => MonadError e m | m -> e where
-    throwError :: e -> m a
-    catchError :: m a -> (e -> m a) -> m a
-
-class (Monad m) => MonadReader r m | m -> r where
-    ask   :: m r
-    local :: (r -> r) -> m a -> m a
-\end{verbatim}
-
-Although programmers can instantiate their own data types by defining
-the required functions, it is always nice to make use of existing code:
-
-\begin{verbatim}
-newtype Reader r a = Reader { runReader :: r -> a }
-
-instance Monad (Reader r) where
-    return a = Reader $ \_ -> a
-    m >>= k  = Reader $ \r -> runReader (k (runReader m r)) r
-
-instance MonadReader r (Reader r) where
-    ask       = Reader id
-    local f m = Reader $ runReader m . f
-
-newtype Writer w a = Writer { runWriter :: (a, w) }
-
-instance (Monoid w) => Monad (Writer w) where
-    return a = Writer (a, mempty)
-    m >>= k  = Writer $ let
-        (a, w)  = runWriter m
-        (b, w') = runWriter (k a)
-        in (b, w `mappend` w')
-
-instance (Monoid w) => MonadWriter w (Writer w) where
-    tell   w = Writer ((), w)
-    listen m = Writer $ let (a, w) = runWriter m in ((a, w), w)
-    pass   m = Writer $ let ((a, f), w) = runWriter m in (a, f w)
-
-instance (Error e) => MonadError e (Either e) where
-    throwError             = Left
-    Left  l `catchError` h = h l
-    Right r `catchError` _ = Right r
-\end{verbatim}
-
-In general, a type |X| (Cont, Reader, Writer, State, etc.)  is an
-instance of |Monad|, and an instance of |MonadX| as well.  But |Error|
-is an exception here!  |Error| is a class, not a type, and not a
-subclass of |Monad|, so do not get confused.
-
-What if we want to add error handling, state, logging, and I/O
-together?  Most likely we do not want to reinvent the wheel and
-instantiate our data type for each of those classes.  This is how
-monad transformers come into play!  Basically, we use a stack of
-monad transformers to morph our original type, with the innermost
-monad being |Identity| or |IO|.  We will explain the details below.
+function, which lives in just this monad.  In some contexts, this is a
+nice feature, but in general you will be using some operations
+specific to a particular monad, and this forces your operation to stay
+within that special monad.
 
 \subsection{Adding Error Handling}
 
@@ -443,7 +351,7 @@ following version, called |eval2a|.
 
 > eval2a                   ::  Env -> Exp -> Eval2 Value
 > eval2a env (Lit i)       =   return $ IntVal i
-> eval2a env (Var n)       =   Map.lookup n env
+> eval2a env (Var n)       =   maybe (fail ("undefined variable: " ++ n)) return $ Map.lookup n env
 > eval2a env (Plus e1 e2)  =   do  IntVal i1  <- eval2a env e1
 >                                  IntVal i2  <- eval2a env e2
 >                                  return $ IntVal (i1 + i2)
@@ -466,8 +374,8 @@ reporting of the |ErrorT| transformer is not used.  We have to modify
 our definition in order to give useful error messages:
 
 > eval2b                   ::  Env -> Exp -> Eval2 Value
-> eval2b env (Lit i)       =   return $ IntVal i
-> eval2b env (Var n)       =   Map.lookup n env
+> eval2b _   (Lit i)       =   return $ IntVal i
+> eval2b env (Var n)       =   maybe (fail ("undefined variable: " ++ n)) return $ Map.lookup n env
 > eval2b env (Plus e1 e2)  =   do  e1'  <- eval2b env e1
 >                                  e2'  <- eval2b env e2
 >                                  case (e1', e2') of
@@ -511,7 +419,7 @@ what we want.
 
 > eval2c                   ::  Env -> Exp -> Eval2 Value
 > eval2c env (Lit i)       =   return $ IntVal i
-> eval2c env (Var n)       =   Map.lookup n env
+> eval2c env (Var n)       =   maybe (fail ("undefined variable: " ++ n)) return $ Map.lookup n env
 > eval2c env (Plus e1 e2)  =   do  IntVal i1  <- eval2c env e1
 >                                  IntVal i2  <- eval2c env e2
 >                                  return $ IntVal (i1 + i2)
@@ -622,136 +530,6 @@ predefined, which expects a function mapping the environment to a
 value.  This can be used to extract individual components of the
 environment by applying |asks| to record selector functions.
 
-\subsection{A Few Words on Monad Transformers}
-\label{sec:wei-mt}
-
-As we have mentioned, |ErrorT| transforms a monad into a |MonadError|:
-
-\begin{verbatim}
-newtype ErrorT e m a = ErrorT { runErrorT :: m (Either e a) }
-
-instance (Monad m, Error e) => Monad (ErrorT e m) where
-    return a = ErrorT $ return (Right a)
-    m >>= k  = ErrorT $ do
-        a <- runErrorT m
-        case a of
-            Left  l -> return (Left l)
-            Right r -> runErrorT (k r)
-    fail msg = ErrorT $ return (Left (strMsg msg))
-
-instance (Monad m, Error e) => MonadError e (ErrorT e m) where
-    throwError l     = ErrorT $ return (Left l)
-    m `catchError` h = ErrorT $ do
-        a <- runErrorT m
-        case a of
-            Left  l -> runErrorT (h l)
-            Right r -> return (Right r)
-\end{verbatim}
-
-After we add another layer of |ReaderT| on the top, we get a
-|MonadReader|.  So we are able to call |ask| and |local| in |eval3|.
-But we also need to call functions provided by the monads buried
-inside ReaderT too!  In this case, we want to call |throwError|
-provided by MonadError.  We could abstract this pattern with a new class:
-
-\begin{verbatim}
-class MonadTrans t where
-    lift :: Monad m => m a -> t m a
-\end{verbatim}
-
-The |lift| function is supposed to be composed with functions whose
-return type corresponds to the inner monad.  In some sense, |lift|
-lifts the return value of a function up by one layer in the monad
-stack.  Or, to think in a more intuitive way, |lift| sends your
-command inwards by one layer.  To access a function |foo| provided by
-a monad three layers down the stack, you need to compose lift three
-times: \verb+lift $ lift $ lift $ foo+.
-
-Back to our example.  As we should be expecting, the two transformers
-ReaderT and ErrorT really are instances of the MonadTrans class:
-
-\begin{verbatim}
-instance MonadTrans (ReaderT r) where
-    lift m = ReaderT $ \_ -> m
-
-instance (Error e) => MonadTrans (ErrorT e) where
-    lift m = ErrorT $ do
-        a <- m
-        return (Right a)
-\end{verbatim}
-
-At this point you should be wondering, why were we able to call
-|throwError| in |eval3| without first lifting it?  The answer is
-because the mtl writers decided to save us some time by instantiating
-ReaderT as a MonadError.  In fact, an ErrorT is a MonadReader too:
-
-\begin{verbatim}
-instance (MonadError e m) => MonadError e (ReaderT r m) where
-    throwError       = lift . throwError
-    m `catchError` h = ReaderT $ \r -> runReaderT m r
-        `catchError` \e -> runReaderT (h e) r
-
-instance (Error e, MonadReader r m) => MonadReader r (ErrorT e m) where
-    ask       = lift ask
-    local f m = ErrorT $ local f (runErrorT m)
-\end{verbatim}
-
-The mtl writers even went through all the trouble and made the monad
-transformers instances of each other (that is $n^{2}$ instances)!  If
-you need to build a new monad transformer yourself, think carefully
-about the design of all the plumbing behind the scene.
-
-Down in this document, we call |liftIO| in |eval6| to perform I/O
-actions.  Why do we need to lift in this case?  Because there is no IO
-class for which we can instantiate a type as.  Therefore, for I/O
-actions, we have to call lift to send the commands inwards.  For
-|eval6|, we would need to compose |lift| four times to print
-something.  This is just inconvenient, so people create a new class
-|MonadIO| such that we only need to call |liftIO| once, without having
-to keep count of how many times to compose |lift|:
-
-\begin{verbatim}
-class (Monad m) => MonadIO m where
-    liftIO :: IO a -> m a
-
-instance MonadIO IO where
-    liftIO = id
-
-instance (Error e, MonadIO m) => MonadIO (ErrorT e m) where
-    liftIO = lift . liftIO
-
-instance (MonadIO m) => MonadIO (ReaderT r m) where
-    liftIO = lift . liftIO
-\end{verbatim}
-
-Finally, let us study the types from |runEval1| to |runEval6|
-intuitively.  |runEval1| is easy.  For the other functions, they pick
-up the right types and compose them together along the way as they
-peel the onion of monads.  Just pay attention to how their types
-change as we extend these functions.  For example, let us decide the
-return value for |runEval4|.  Ignoring ReaderT as it does not affect
-the return value (although it does affect runEval4's arguments),
-runEval4 first peels off ErrorT and constructs a value of type |Either
-String a|.  Next, it peels off StateT and constructs a pair whose
-first component is the value being computed, and whose second
-component is the side effect, i.e., the state.  Therefore, the type of
-the final result is |(Either String a, Integer)|.  In contrast,
-|runEval4'| first peels off StateT and then ErrorT.  Hence we get
-|Either String (a, Integer)|.
-
-To learn more about monads and monad transformers in practice, read
-\href{http://www.haskell.org/all_about_monads/}{All
-About Monads},
-\href{http://en.wikibooks.org/wiki/Haskell/Monad_transformers}{Monad
-transformers on WikiBooks},
-\href{http://haskell.org/haskellwiki/Category:Monad}{Monad on
-haskell.org}, and
-\href{http://en.wikibooks.org/wiki/Write_Yourself_a_Scheme_in_48_Hours}{Write
-Yourself a Scheme in 48 Hours}.  For more category theory stuff, start
-with
-\href{http://en.wikibooks.org/wiki/Haskell/Category_theory}{Category
-theory on WikiBooks}, \href{http://stefan-klinger.de/files/monadGuide.pdf}{The Haskell Programmer's Guide to the IO Monad --- Don't Panic}, and \href{ftp://ftp.cs.wpi.edu/pub/techreports/pdf/03-21.pdf}{Monads for Programming Languages}.
-
 \subsection{Adding State}
 \label{sec:state-monad}
 
@@ -797,7 +575,7 @@ numeric, so that we can use the |(+)| operator on it.
 By adding a call to the |tick| function in each case, we can count the
 number of applications.
 
-> -- eval4               ::  Exp -> Eval4 Value
+> eval4               ::  Exp -> Eval4 Value
 > eval4 (Lit i)       =   do  tick
 >                             return $ IntVal i
 > eval4 (Var n)       =   do  tick
@@ -992,18 +770,48 @@ monads for many applications, reducing the temptation to put
 everything possibly needed into the one and only monad hand-made for
 the current application.
 
-\bigskip Happy hacking in Haskell!\footnote{The main function is
-  defined at the end of the source file, not shown in this PDF document.}
+\bigskip
+Happy hacking in Haskell!
 
 \section*{Acknowledgements}
 
 Thanks to Christian Maeder, Bruno Mart{\'i}nez and Tomasz Zielonka for
-their valuable feedback and suggestions for improvement.
+their valuable feedback and suggestions for improvement. Also thanks
+to G{\'a}bor Lipt{\'a}k for providing patches to port this tutorial to newer
+GHC versions.
+
+\section*{See also}
+\begin{itemize}
+  \item Reddit link {\small\tt
+\url{https://www.reddit.com/r/haskell/comments/un40c/monad_transformers_step_by_step/}}
+\end{itemize}
 
 \bibliographystyle{plain}
 \bibliography{bibliography}
 
 \end{document}
+
+> eval4'               ::  Exp -> Eval4' Value
+> eval4' (Lit i)       =   return $ IntVal i
+> eval4' (Var n)       =   do env <- ask
+>                             case Map.lookup n env of
+>                                Nothing -> throwError ("unbound variable: " ++ n)
+>                                Just val -> return val
+> eval4' (Plus e1 e2)  =   do  e1'  <- eval4' e1
+>                              e2'  <- eval4' e2
+>                              case (e1', e2') of
+>                               (IntVal i1, IntVal i2) ->
+>                                   return $ IntVal (i1 + i2)
+>                               _ -> throwError "type error in addition"
+> eval4' (Abs n e)     =   do  env <- ask
+>                              return $ FunVal env n e
+> eval4' (App e1 e2)   =   do  val1  <- eval4' e1
+>                              val2  <- eval4' e2
+>                              case val1 of
+>                                FunVal env' n body ->
+>                                   local (const (Map.insert n val2 env'))
+>                                     (eval4' body)
+>                                _ -> throwError "type error in application"
 
 > main = do let r0 = eval0 Map.empty exampleExp
 >           print r0
@@ -1021,7 +829,7 @@ their valuable feedback and suggestions for improvement.
 >           print r3
 >           let r4 = runEval4 Map.empty 0 (eval4 exampleExp)
 >           print r4
->           let r4' = runEval4' Map.empty 0 (eval4 exampleExp)
+>           let r4' = runEval4' Map.empty 0 (eval4' exampleExp)
 >           print r4'
 >           let r5 = runEval5 Map.empty 0 (eval5 exampleExp)
 >           print r5
@@ -1034,3 +842,5 @@ their valuable feedback and suggestions for improvement.
 
 
 --  LocalWords:  ErrorT StateT GHC Exp deconstruct monad's ReaderT Env
+
+
